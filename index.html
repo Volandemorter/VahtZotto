@@ -54,7 +54,6 @@
         .info-note { font-size: 0.7rem; text-align: center; margin-top: 24px; color: #4b5563; }
         .sync-status { font-size: 0.8rem; color: #16a34a; background: #dcfce7; padding: 4px 12px; border-radius: 40px; }
     </style>
-    <!-- Импорт Firebase (модульная версия) -->
     <script type="importmap">
         {
             "imports": {
@@ -69,11 +68,11 @@
         import { getDatabase, ref, set, onValue, update } from "firebase/database";
         import { getAuth, signInAnonymously } from "firebase/auth";
 
-        // Ваша конфигурация Firebase
+        // Конфигурация Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyAJ-2s5Z4midklTLueeQMyGVX8fX5dd3Bc",
             authDomain: "vahtzotto.firebaseapp.com",
-              databaseURL: "https://vahtzotto-default-rtdb.europe-west1.firebasedatabase.app", 
+            databaseURL: "https://vahtzotto-default-rtdb.europe-west1.firebasedatabase.app",
             projectId: "vahtzotto",
             storageBucket: "vahtzotto.firebasestorage.app",
             messagingSenderId: "565094303341",
@@ -81,13 +80,12 @@
             measurementId: "G-7YQNB3W3JS"
         };
 
-        // Инициализация
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         const auth = getAuth(app);
-        const dbRef = ref(db, 'vakhta'); // общая база по пути /vakhta
+        const dbRef = ref(db, 'vakhta');
 
-        // Данные участников (имена из вашего Excel)
+        // Данные участников (имена из Excel)
         const PERSONS = [
             { name: "Арясов Владимир Евгеньевич", colorClass: "color-alexander", colorCode: "#fecaca" },
             { name: "Путилин Илья Романович",    colorClass: "color-vladimir", colorCode: "#bbf7d0" },
@@ -121,7 +119,7 @@
 
         let currentYear = 2026;
         let tripsData = [[],[],[],[]];
-        let isLocalUpdate = false; // предотвращаем циклы
+        let isLocalUpdate = false;
 
         // === Вспомогательные функции ===
         function parseDate(str) { return new Date(str + "T12:00:00"); }
@@ -314,7 +312,7 @@
         // === Сохранение в Firebase ===
         function saveToFirebase() {
             if (isLocalUpdate) return;
-            set(ref(db, 'vakhta'), {
+            set(dbRef, {
                 year: currentYear,
                 trips: tripsData
             }).catch(err => console.error("Ошибка сохранения:", err));
@@ -325,7 +323,7 @@
             const newYear = currentYear + delta;
             if (newYear < 2000 || newYear > 2100) return;
             currentYear = newYear;
-            update(ref(db, 'vakhta'), { year: currentYear });
+            update(dbRef, { year: currentYear });
         }
 
         function resetYear() {
@@ -335,31 +333,39 @@
             }
         }
 
+        // Принудительная загрузка Excel-данных (на случай сбоя)
+        function loadExcelData() {
+            if (confirm("Перезаписать все данные данными из Excel?")) {
+                set(dbRef, {
+                    year: 2026,
+                    trips: defaultTrips
+                }).then(() => {
+                    alert("✅ Данные из Excel загружены!");
+                }).catch(err => alert("Ошибка: " + err));
+            }
+        }
+
         // === Синхронизация с Firebase ===
         function startSync() {
-            onValue(ref(db, 'vakhta'), (snapshot) => {
+            onValue(dbRef, (snapshot) => {
                 const data = snapshot.val();
-                if (!data) {
-                    // Если данных нет, загружаем дефолтные (из Excel)
-                    isLocalUpdate = true;
+                console.log("Получены данные из Firebase:", data); // для отладки
+                if (data && data.trips && Array.isArray(data.trips) && data.trips.length === PERSONS.length) {
+                    // Данные в базе есть и корректны — используем их
+                    tripsData = data.trips;
+                    currentYear = data.year || 2026;
+                    fullRender();
+                } else {
+                    // База пуста или повреждена — загружаем дефолтные и сохраняем
+                    console.log("База пуста, загружаем дефолтные поездки из Excel");
                     tripsData = JSON.parse(JSON.stringify(defaultTrips));
                     currentYear = 2026;
-                    set(ref(db, 'vakhta'), { year: currentYear, trips: tripsData }).then(() => {
-                        isLocalUpdate = false;
-                        fullRender();
-                    });
-                    return;
+                    set(dbRef, { year: currentYear, trips: tripsData })
+                        .then(() => fullRender())
+                        .catch(err => console.error("Ошибка сохранения дефолтных данных:", err));
                 }
-                // Обновляем локальные данные из Firebase
-                if (data.trips && Array.isArray(data.trips) && data.trips.length === PERSONS.length) {
-                    tripsData = data.trips;
-                }
-                if (data.year && typeof data.year === 'number') {
-                    currentYear = data.year;
-                }
-                fullRender();
             }, (error) => {
-                console.error("Ошибка синхронизации:", error);
+                console.error("Ошибка подключения к Firebase:", error);
                 document.getElementById('syncStatus').innerText = '⚠️ офлайн';
             });
         }
@@ -371,6 +377,7 @@
         document.getElementById('prevYear').onclick = () => changeYear(-1);
         document.getElementById('nextYear').onclick = () => changeYear(1);
         document.getElementById('resetYearBtn').onclick = () => resetYear();
+        document.getElementById('loadExcelBtn').onclick = () => loadExcelData();
 
         startSync();
     </script>
@@ -391,6 +398,7 @@
         </div>
         <div class="action-buttons">
             <button id="resetYearBtn" class="warning">♻ Сбросить все поездки за год</button>
+            <button id="loadExcelBtn" class="primary">📥 Загрузить данные из Excel</button>
             <span id="syncStatus" class="sync-status">🟢 онлайн</span>
         </div>
     </div>
